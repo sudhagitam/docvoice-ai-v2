@@ -1,0 +1,111 @@
+@import url('https://fonts.googleapis.com/css2?family=Syne:wght@400;500;600;700;800&family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;1,9..40,300&family=JetBrains+Mono:wght@400;500&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ── Base ─────────────────────────────────────────────────────────────────── */
+:root {
+  --voice-glow: rgba(62, 207, 207, 0.18);
+  --voice:      #3ECFCF;
+}
+
+* { box-sizing: border-box; }
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  @apply bg-ink-950 text-ink-100 font-body antialiased;
+  background-image:
+    radial-gradient(ellipse 80% 50% at 50% -20%, rgba(62,207,207,0.08) 0%, transparent 60%),
+    radial-gradient(ellipse 60% 40% at 80% 80%, rgba(245,166,35,0.04) 0%, transparent 50%);
+  background-attachment: fixed;
+}
+
+/* ── Scrollbar ────────────────────────────────────────────────────────────── */
+::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { @apply bg-ink-600 rounded-full; }
+::-webkit-scrollbar-thumb:hover { @apply bg-ink-400; }
+
+/* ── Custom range slider ─────────────────────────────────────────────────── */
+input[type="range"] {
+  -webkit-appearance: none;
+  appearance: none;
+  background: transparent;
+  cursor: pointer;
+}
+
+input[type="range"]::-webkit-slider-track {
+  @apply bg-ink-700 rounded-full;
+  height: 4px;
+}
+
+input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--voice);
+  margin-top: -6px;
+  box-shadow: 0 0 8px var(--voice-glow);
+  transition: transform 0.15s, box-shadow 0.15s;
+}
+
+input[type="range"]::-webkit-slider-thumb:hover {
+  transform: scale(1.2);
+  box-shadow: 0 0 16px rgba(62,207,207,0.4);
+}
+
+input[type="range"]::-moz-range-track {
+  @apply bg-ink-700 rounded-full;
+  height: 4px;
+}
+
+input[type="range"]::-moz-range-thumb {
+  width: 16px;
+  height: 16px;
+  border: none;
+  border-radius: 50%;
+  background: var(--voice);
+  box-shadow: 0 0 8px var(--voice-glow);
+}
+
+/* ── Glass card ──────────────────────────────────────────────────────────── */
+.glass {
+  background: rgba(22, 27, 34, 0.7);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(62, 207, 207, 0.1);
+}
+
+/* ── Equaliser bars animation ────────────────────────────────────────────── */
+.eq-bar {
+  display: inline-block;
+  width: 3px;
+  border-radius: 2px;
+  background: var(--voice);
+  animation: eq 1.2s ease-in-out infinite;
+}
+.eq-bar:nth-child(2) { animation-delay: 0.15s; height: 60%; }
+.eq-bar:nth-child(3) { animation-delay: 0.3s;  height: 90%; }
+.eq-bar:nth-child(4) { animation-delay: 0.45s; height: 40%; }
+.eq-bar:nth-child(5) { animation-delay: 0.6s;  height: 75%; }
+
+@keyframes eq {
+  0%, 100% { transform: scaleY(0.3); }
+  50%       { transform: scaleY(1); }
+}
+
+/* ── Glow text ───────────────────────────────────────────────────────────── */
+.text-glow {
+  text-shadow: 0 0 24px rgba(62, 207, 207, 0.5);
+}
+
+/* ── Audio player ────────────────────────────────────────────────────────── */
+audio::-webkit-media-controls-panel {
+  background: rgba(22, 27, 34, 0.9);
+}
