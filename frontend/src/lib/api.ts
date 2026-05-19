@@ -1,41 +1,36 @@
 /**
  * DocVoice AI – API client
- * All network calls to the FastAPI backend live here.
+ * Uses NEXT_PUBLIC_API_URL for Cloud Run backend.
+ * Falls back to relative /api for Vercel-only deployments.
  */
 
-const BASE = process.env.NEXT_PUBLIC_API_URL || "";
+// Cloud Run URL set in Vercel env vars, empty string = same-origin (Vercel only)
+const BASE = (process.env.NEXT_PUBLIC_API_URL || "").replace(/\/$/, "");
 
-export interface Language {
-  code: string;
-  label: string;
-}
-
-export interface Accent {
-  tld: string;
-  label: string;
-}
+export interface Language  { code: string; label: string; }
+export interface Accent    { tld: string;  label: string; }
 
 export interface LanguagesResponse {
-  languages: Record<string, string>;
+  languages:       Record<string, string>;
   english_accents: Record<string, string>;
 }
 
 export interface ExtractResponse {
-  filename: string;
+  filename:  string;
   char_count: number;
   truncated: boolean;
-  text: string;
+  text:      string;
 }
 
 export interface SynthesizeOptions {
-  file: File;
-  lang: string;
-  tld: string;
-  slow: boolean;
+  file:        File;
+  lang:        string;
+  tld:         string;
+  slow:        boolean;
   onProgress?: (pct: number) => void;
 }
 
-// ── Fetch helpers ─────────────────────────────────────────────────────────────
+// ── Helpers ───────────────────────────────────────────────────────────────────
 
 async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${BASE}/api${path}`, init);
@@ -59,8 +54,8 @@ export async function extractText(file: File): Promise<ExtractResponse> {
 }
 
 /**
- * Upload a document and return an object-URL pointing to the generated MP3.
- * Uses XMLHttpRequest so we can report upload progress.
+ * Synthesize – uses XHR so upload progress is reported.
+ * Returns an object URL pointing to the generated MP3 blob.
  */
 export function synthesize(opts: SynthesizeOptions): Promise<string> {
   const { file, lang, tld, slow, onProgress } = opts;
@@ -69,7 +64,7 @@ export function synthesize(opts: SynthesizeOptions): Promise<string> {
     const form = new FormData();
     form.append("file", file);
     form.append("lang", lang);
-    form.append("tld", tld);
+    form.append("tld",  tld);
     form.append("slow", String(slow));
 
     const xhr = new XMLHttpRequest();
@@ -87,7 +82,6 @@ export function synthesize(opts: SynthesizeOptions): Promise<string> {
         const blob = new Blob([xhr.response], { type: "audio/mpeg" });
         resolve(URL.createObjectURL(blob));
       } else {
-        // Try to parse error body
         const reader = new FileReader();
         reader.onload = () => {
           try {
