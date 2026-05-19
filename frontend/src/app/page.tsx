@@ -1,6 +1,6 @@
 "use client";
 
-import { AlertCircle, Mic, RotateCcw, Waveform } from "lucide-react";
+import { AlertCircle, Mic, RotateCcw } from "lucide-react";
 import AudioPlayer from "@/components/AudioPlayer";
 import DropZone from "@/components/DropZone";
 import ProgressBar from "@/components/ProgressBar";
