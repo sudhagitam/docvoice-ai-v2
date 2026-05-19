@@ -8,8 +8,8 @@ import logging
 import os
 import textwrap
 import uuid
+from typing import Iterator, Optional
 from pathlib import Path
-from typing import Iterator
 
 from core.config import settings
 from core.exceptions import TTSError
@@ -160,5 +160,3 @@ class TTSEngine:
             raise TTSError(str(exc)) from exc
 
 
-# Optional type hint
-from typing import Optional
