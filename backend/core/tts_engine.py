@@ -9,7 +9,7 @@ import os
 import textwrap
 import uuid
 from pathlib import Path
-from typing import Iterator
+from typing import Iterator, Optional
 
 from core.config import settings
 from core.exceptions import TTSError
@@ -160,5 +160,4 @@ class TTSEngine:
             raise TTSError(str(exc)) from exc
 
 
-# Optional type hint
-from typing import Optional
+

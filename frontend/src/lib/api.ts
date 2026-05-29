@@ -4,8 +4,10 @@
  * Falls back to relative /api for Vercel-only deployments.
  */
 
-// Cloud Run URL set in Vercel env vars, empty string = same-origin (Vercel only)
 const BASE = (process.env.NEXT_PUBLIC_API_URL || "").replace(/\/$/, "");
+
+// Large file timeout: 10 minutes (gTTS is slow for big docs)
+const SYNTHESIS_TIMEOUT_MS = 10 * 60 * 1000;
 
 export interface Language  { code: string; label: string; }
 export interface Accent    { tld: string;  label: string; }
@@ -16,10 +18,10 @@ export interface LanguagesResponse {
 }
 
 export interface ExtractResponse {
-  filename:  string;
+  filename:   string;
   char_count: number;
-  truncated: boolean;
-  text:      string;
+  truncated:  boolean;
+  text:       string;
 }
 
 export interface SynthesizeOptions {
@@ -54,8 +56,13 @@ export async function extractText(file: File): Promise<ExtractResponse> {
 }
 
 /**
- * Synthesize – uses XHR so upload progress is reported.
+ * Synthesize – uses XHR for upload progress reporting.
  * Returns an object URL pointing to the generated MP3 blob.
+ *
+ * Fixes for large files:
+ * - 10-minute timeout (SYNTHESIS_TIMEOUT_MS)
+ * - Two-phase progress: 0-50% = upload, 50-99% = server processing
+ * - Clear error messages for timeout vs network failure
  */
 export function synthesize(opts: SynthesizeOptions): Promise<string> {
   const { file, lang, tld, slow, onProgress } = opts;
@@ -71,14 +78,44 @@ export function synthesize(opts: SynthesizeOptions): Promise<string> {
     xhr.open("POST", `${BASE}/api/synthesize`);
     xhr.responseType = "blob";
 
+    // ── Timeout: 10 minutes for large files ──────────────────────────────────
+    xhr.timeout = SYNTHESIS_TIMEOUT_MS;
+
+    // ── Phase 1: Upload progress (0 → 50%) ───────────────────────────────────
     xhr.upload.addEventListener("progress", (e) => {
       if (e.lengthComputable && onProgress) {
-        onProgress(Math.round((e.loaded / e.total) * 100));
+        const uploadPct = Math.round((e.loaded / e.total) * 50);
+        onProgress(uploadPct);
       }
     });
 
+    // ── Phase 2: Server processing (50 → 99%) ────────────────────────────────
+    // Once upload finishes, pulse progress to show server is working
+    xhr.upload.addEventListener("load", () => {
+      if (!onProgress) return;
+      onProgress(55);
+      let pct = 55;
+      const interval = setInterval(() => {
+        if (pct < 95) {
+          pct += Math.random() * 2; // slow crawl to show activity
+          onProgress(Math.min(Math.round(pct), 95));
+        } else {
+          clearInterval(interval);
+        }
+      }, 2000);
+
+      // Store interval id so we can clear on completion
+      (xhr as any)._progressInterval = interval;
+    });
+
     xhr.addEventListener("load", () => {
+      // Clear the progress interval if running
+      if ((xhr as any)._progressInterval) {
+        clearInterval((xhr as any)._progressInterval);
+      }
+
       if (xhr.status >= 200 && xhr.status < 300) {
+        onProgress?.(100);
         const blob = new Blob([xhr.response], { type: "audio/mpeg" });
         resolve(URL.createObjectURL(blob));
       } else {
@@ -95,7 +132,22 @@ export function synthesize(opts: SynthesizeOptions): Promise<string> {
       }
     });
 
-    xhr.addEventListener("error", () => reject(new Error("Network error")));
+    xhr.addEventListener("timeout", () => {
+      if ((xhr as any)._progressInterval) {
+        clearInterval((xhr as any)._progressInterval);
+      }
+      reject(new Error(
+        "Request timed out after 10 minutes. Try a smaller document or split the PDF into chapters."
+      ));
+    });
+
+    xhr.addEventListener("error", () => {
+      if ((xhr as any)._progressInterval) {
+        clearInterval((xhr as any)._progressInterval);
+      }
+      reject(new Error("Network error – is the backend running on port 8000?"));
+    });
+
     xhr.addEventListener("abort", () => reject(new Error("Request aborted")));
 
     xhr.send(form);
