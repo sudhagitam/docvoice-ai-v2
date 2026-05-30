@@ -1,9 +1,10 @@
 """
 DocVoice AI – TTS Engine
-Uses Microsoft Edge TTS (edge-tts) as primary engine.
-Edge TTS is fully async — no asyncio.run() needed inside FastAPI.
+Uses gTTS (Google Text-to-Speech) as primary engine.
+gTTS is synchronous — wrapped with asyncio.to_thread for FastAPI compatibility.
 """
 
+import asyncio
 import io
 import logging
 import os
@@ -41,30 +42,11 @@ ENGLISH_ACCENTS: dict[str, str] = {
     "ca":     "Canadian English",
 }
 
-EDGE_VOICES: dict[str, str] = {
-    "en-com":    "en-US-AriaNeural",
-    "en-co.uk":  "en-GB-SoniaNeural",
-    "en-com.au": "en-AU-NatashaNeural",
-    "en-co.in":  "en-IN-NeerjaNeural",
-    "en-ca":     "en-CA-ClaraNeural",
-    "es":        "es-ES-ElviraNeural",
-    "fr":        "fr-FR-DeniseNeural",
-    "de":        "de-DE-KatjaNeural",
-    "it":        "it-IT-ElsaNeural",
-    "pt":        "pt-BR-FranciscaNeural",
-    "hi":        "hi-IN-SwaraNeural",
-    "ja":        "ja-JP-NanamiNeural",
-    "ko":        "ko-KR-SunHiNeural",
-    "zh":        "zh-CN-XiaoxiaoNeural",
-    "ar":        "ar-SA-ZariyahNeural",
-    "ru":        "ru-RU-SvetlanaNeural",
-}
-
 
 class TTSEngine:
     """
-    Converts plain text to MP3 using Microsoft Edge TTS.
-    All synthesis methods are async — call with await inside FastAPI.
+    Converts plain text to MP3 using Google TTS (gTTS).
+    synthesize() and synthesize_to_file() are async-compatible via asyncio.to_thread.
     """
 
     CHUNK_SIZE = 4_000
@@ -73,24 +55,21 @@ class TTSEngine:
         self.lang = lang if lang in SUPPORTED_LANGUAGES else "en"
         self.slow = slow
         self.tld = tld
-        key = f"{self.lang}-{self.tld}" if self.lang == "en" else self.lang
-        self.edge_voice = EDGE_VOICES.get(key, "en-US-AriaNeural")
-        self.edge_rate = "-30%" if self.slow else "+0%"
 
     # ── Public async API ──────────────────────────────────────────────────────
 
     async def synthesize(self, text: str) -> bytes:
-        """Convert text to MP3 bytes using Edge TTS."""
+        """Convert text to MP3 bytes using gTTS (runs in thread pool)."""
         if not text.strip():
             raise TTSError("Empty text passed to TTS engine.")
 
         chunks = list(self._chunk(text))
-        logger.info("Synthesising %d chunk(s) via Edge TTS, voice=%s", len(chunks), self.edge_voice)
+        logger.info("Synthesising %d chunk(s) via gTTS, lang=%s tld=%s", len(chunks), self.lang, self.tld)
 
         mp3_parts: list[bytes] = []
         for i, chunk in enumerate(chunks, 1):
             logger.debug("Processing chunk %d/%d (%d chars)", i, len(chunks), len(chunk))
-            mp3_parts.append(await self._edge_chunk(chunk))
+            mp3_parts.append(await asyncio.to_thread(self._gtts_chunk, chunk))
 
         audio = b"".join(mp3_parts)
         logger.info("Synthesis complete: %d bytes", len(audio))
@@ -108,28 +87,23 @@ class TTSEngine:
         logger.info("Wrote MP3 to %s", output_path)
         return output_path
 
-    # ── Edge TTS (async) ──────────────────────────────────────────────────────
+    # ── gTTS (sync, run in thread) ────────────────────────────────────────────
 
-    async def _edge_chunk(self, text: str) -> bytes:
-        """Synthesise one chunk via edge-tts. Returns raw MP3 bytes."""
+    def _gtts_chunk(self, text: str) -> bytes:
+        """Call gTTS for a single chunk and return raw MP3 bytes."""
         try:
-            import edge_tts
-            communicate = edge_tts.Communicate(
-                text=text,
-                voice=self.edge_voice,
-                rate=self.edge_rate,
-            )
+            from gtts import gTTS
+        except ImportError as exc:
+            raise TTSError("gTTS is not installed. Add gTTS to requirements.txt.") from exc
+
+        try:
+            tts = gTTS(text=text, lang=self.lang, slow=self.slow, tld=self.tld)
             buf = io.BytesIO()
-            async for chunk in communicate.stream():
-                if chunk["type"] == "audio":
-                    buf.write(chunk["data"])
+            tts.write_to_fp(buf)
             buf.seek(0)
-            data = buf.read()
-            if not data:
-                raise TTSError("Edge TTS returned empty audio for this chunk")
-            return data
+            return buf.read()
         except Exception as exc:
-            logger.exception("Edge TTS chunk failed")
+            logger.exception("gTTS synthesis failed")
             raise TTSError(str(exc)) from exc
 
     # ── Chunking ──────────────────────────────────────────────────────────────
