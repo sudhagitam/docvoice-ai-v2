@@ -17,3 +17,5 @@ gTTS==2.5.1
 # Uncomment to enable OCR for scanned PDFs (requires system-level tesseract)
 # pdf2image==1.17.0
 # pytesseract==0.3.10
+# Open and add this line to requirements.txt
+edge-tts==6.1.9
