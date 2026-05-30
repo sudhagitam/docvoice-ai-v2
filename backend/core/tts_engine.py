@@ -1,11 +1,13 @@
 """
 DocVoice AI – TTS Engine
-Converts text to MP3 using gTTS with chunking support for large documents.
+Uses Microsoft Edge TTS (edge-tts) as primary engine.
+Edge TTS is fully async — no asyncio.run() needed inside FastAPI.
 """
 
 import io
 import logging
 import os
+import re
 import textwrap
 import uuid
 from pathlib import Path
@@ -16,7 +18,6 @@ from core.exceptions import TTSError
 
 logger = logging.getLogger("docvoice.tts")
 
-# Supported languages exposed to the frontend
 SUPPORTED_LANGUAGES: dict[str, str] = {
     "en": "English",
     "es": "Spanish",
@@ -32,77 +33,72 @@ SUPPORTED_LANGUAGES: dict[str, str] = {
     "ru": "Russian",
 }
 
-# gTTS TLD → accent mapping (English only)
 ENGLISH_ACCENTS: dict[str, str] = {
-    "com": "US English",
-    "co.uk": "UK English",
+    "com":    "US English",
+    "co.uk":  "UK English",
     "com.au": "Australian English",
-    "co.in": "Indian English",
-    "ca": "Canadian English",
+    "co.in":  "Indian English",
+    "ca":     "Canadian English",
+}
+
+EDGE_VOICES: dict[str, str] = {
+    "en-com":    "en-US-AriaNeural",
+    "en-co.uk":  "en-GB-SoniaNeural",
+    "en-com.au": "en-AU-NatashaNeural",
+    "en-co.in":  "en-IN-NeerjaNeural",
+    "en-ca":     "en-CA-ClaraNeural",
+    "es":        "es-ES-ElviraNeural",
+    "fr":        "fr-FR-DeniseNeural",
+    "de":        "de-DE-KatjaNeural",
+    "it":        "it-IT-ElsaNeural",
+    "pt":        "pt-BR-FranciscaNeural",
+    "hi":        "hi-IN-SwaraNeural",
+    "ja":        "ja-JP-NanamiNeural",
+    "ko":        "ko-KR-SunHiNeural",
+    "zh":        "zh-CN-XiaoxiaoNeural",
+    "ar":        "ar-SA-ZariyahNeural",
+    "ru":        "ru-RU-SvetlanaNeural",
 }
 
 
 class TTSEngine:
     """
-    Converts plain text to MP3 audio using gTTS.
-
-    Supports:
-    - Multiple languages
-    - Slow/normal speed
-    - Chunked synthesis for large texts (avoids gTTS request-size limits)
-    - In-memory concatenation (no pydub needed for simple concat)
+    Converts plain text to MP3 using Microsoft Edge TTS.
+    All synthesis methods are async — call with await inside FastAPI.
     """
 
-    CHUNK_SIZE = 4_000  # characters per gTTS request
+    CHUNK_SIZE = 4_000
 
     def __init__(self, lang: str = "en", slow: bool = False, tld: str = "com"):
         self.lang = lang if lang in SUPPORTED_LANGUAGES else "en"
         self.slow = slow
         self.tld = tld
+        key = f"{self.lang}-{self.tld}" if self.lang == "en" else self.lang
+        self.edge_voice = EDGE_VOICES.get(key, "en-US-AriaNeural")
+        self.edge_rate = "-30%" if self.slow else "+0%"
 
-    # ── Public API ────────────────────────────────────────────────────────────
+    # ── Public async API ──────────────────────────────────────────────────────
 
-    def synthesize(self, text: str) -> bytes:
-        """
-        Convert *text* to MP3 bytes.
-
-        Chunks long text, synthesises each chunk, and concatenates raw MP3
-        frames (valid for gTTS output which uses MPEG frames).
-
-        Args:
-            text: Plain text to convert.
-
-        Returns:
-            MP3 audio as bytes.
-
-        Raises:
-            TTSError on synthesis failure.
-        """
+    async def synthesize(self, text: str) -> bytes:
+        """Convert text to MP3 bytes using Edge TTS."""
         if not text.strip():
             raise TTSError("Empty text passed to TTS engine.")
 
         chunks = list(self._chunk(text))
-        logger.info(
-            "Synthesising %d chunk(s), lang=%s, slow=%s", len(chunks), self.lang, self.slow
-        )
+        logger.info("Synthesising %d chunk(s) via Edge TTS, voice=%s", len(chunks), self.edge_voice)
 
         mp3_parts: list[bytes] = []
         for i, chunk in enumerate(chunks, 1):
             logger.debug("Processing chunk %d/%d (%d chars)", i, len(chunks), len(chunk))
-            mp3_parts.append(self._gtts_chunk(chunk))
+            mp3_parts.append(await self._edge_chunk(chunk))
 
         audio = b"".join(mp3_parts)
         logger.info("Synthesis complete: %d bytes", len(audio))
         return audio
 
-    def synthesize_to_file(self, text: str, output_path: Optional[str] = None) -> str:
-        """
-        Synthesise *text* and write to a temp file.
-
-        Returns:
-            Absolute path to the generated MP3 file.
-        """
-        audio_bytes = self.synthesize(text)
+    async def synthesize_to_file(self, text: str, output_path: Optional[str] = None) -> str:
+        """Synthesise text and write to a temp file. Returns path to MP3."""
+        audio_bytes = await self.synthesize(text)
 
         if output_path is None:
             os.makedirs(settings.TMP_DIR, exist_ok=True)
@@ -112,16 +108,37 @@ class TTSEngine:
         logger.info("Wrote MP3 to %s", output_path)
         return output_path
 
-    # ── Internals ─────────────────────────────────────────────────────────────
+    # ── Edge TTS (async) ──────────────────────────────────────────────────────
+
+    async def _edge_chunk(self, text: str) -> bytes:
+        """Synthesise one chunk via edge-tts. Returns raw MP3 bytes."""
+        try:
+            import edge_tts
+            communicate = edge_tts.Communicate(
+                text=text,
+                voice=self.edge_voice,
+                rate=self.edge_rate,
+            )
+            buf = io.BytesIO()
+            async for chunk in communicate.stream():
+                if chunk["type"] == "audio":
+                    buf.write(chunk["data"])
+            buf.seek(0)
+            data = buf.read()
+            if not data:
+                raise TTSError("Edge TTS returned empty audio for this chunk")
+            return data
+        except Exception as exc:
+            logger.exception("Edge TTS chunk failed")
+            raise TTSError(str(exc)) from exc
+
+    # ── Chunking ──────────────────────────────────────────────────────────────
 
     def _chunk(self, text: str) -> Iterator[str]:
         """Split text into sentence-aware chunks under CHUNK_SIZE chars."""
         if len(text) <= self.CHUNK_SIZE:
             yield text
             return
-
-        # Split on sentence boundaries first
-        import re
 
         sentences = re.split(r"(?<=[.!?])\s+", text)
         buffer = ""
@@ -130,7 +147,6 @@ class TTSEngine:
                 if buffer:
                     yield buffer.strip()
                     buffer = ""
-                # Sentence itself is too long → hard-wrap
                 if len(sentence) > self.CHUNK_SIZE:
                     for sub in textwrap.wrap(sentence, self.CHUNK_SIZE):
                         yield sub
@@ -141,23 +157,3 @@ class TTSEngine:
 
         if buffer.strip():
             yield buffer.strip()
-
-    def _gtts_chunk(self, text: str) -> bytes:
-        """Call gTTS for a single chunk and return raw MP3 bytes."""
-        try:
-            from gtts import gTTS
-        except ImportError as exc:
-            raise TTSError("gTTS is not installed.") from exc
-
-        try:
-            tts = gTTS(text=text, lang=self.lang, slow=self.slow, tld=self.tld)
-            buf = io.BytesIO()
-            tts.write_to_fp(buf)
-            buf.seek(0)
-            return buf.read()
-        except Exception as exc:
-            logger.exception("gTTS synthesis failed")
-            raise TTSError(str(exc)) from exc
-
-
-

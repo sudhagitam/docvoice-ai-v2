@@ -23,7 +23,7 @@ class Settings(BaseSettings):
 
     # Upload limits
     MAX_UPLOAD_BYTES: int = 20 * 1024 * 1024   # 20 MB
-    MAX_TEXT_CHARS: int = 50_000               # ~35 min of speech
+    MAX_TEXT_CHARS: int = 90_000               # ~35 min of speech
 
     # TTS defaults
     DEFAULT_LANG: str = "en"
